@@ -593,7 +593,7 @@ var addition = func(x, y int) int{
 }
 
 z := addition(2, 2)
-fmt.Println(x)
+fmt.Println(z)
 
 
 func printing() {
@@ -603,8 +603,9 @@ func printing() {
   fmt.Println("Hello,")
 }
 
-// filePrinter prints a file to the screen if it doesn't contain TOP SECRET in
-// the file.  This is an example, its is not the most efficient way to do this.
+// filePrinter prints a file to the screen if it doesn't
+// contain TOP SECRET in the file.  This is an example,
+// its is not the most efficient way to do this.
 func filePrinter(filePath string) error {
         f, err := os.Open(filePath)
         if err != nil {
@@ -627,3 +628,283 @@ func filePrinter(filePath string) error {
         fmt.Println(output)
         return nil
 }
+
+func main() {
+  if !secureConnection() {
+    panic("Anyone could be listening!")
+  }
+}
+
+func main() {
+  defer func() {
+    if r := recover(); r != nil {
+      fmt.Printf("Recovered from a panic, panic was: %q\n", r)
+    }
+  }()
+  panic("hello")
+}
+
+
+
+
+
+func filePrinter(filePath string) error {
+        f, err := os.Open(filePath)
+        if err != nil {
+                return err
+        }
+
+        r := bufio.NewReader(f)
+        output := ""
+        for {
+                out, err := r.ReadString('\n')
+                if strings.Contains(out, "TOP SECRET") {
+                        f.Close()  // Now I have to close it here.
+                        return fmt.Errorf("Top Secret file"))
+                }
+                output += out
+                if err != nil {
+                        break
+                }
+        }
+        fmt.Println(output)
+        f.Close()  // And I have to here as well.
+        return nil
+}
+
+
+var sample interface{Add(x, y int) int}
+
+type notRight struct{}
+
+func (n notRight)Hello() {
+  fmt.Println("hello")
+}
+
+// This won't work, because 3 doesn't have any methods on it.
+// sample = 3
+
+// This won't work, because notRight does not have the right method.
+// sample = notRight{}
+
+type math struct {}
+
+func (m math) Add(x, y int) int {
+  return x+y
+}
+
+func (m math) Subtract(x, y int) int {
+  return x-y
+}
+
+// This will work, because it does have the right method.
+sample = math{}
+
+// I can call this, because it is defined on the interface.
+fmt.Println(sample.Add(3, 2))
+
+// This will not work, because the interface does not define this method.
+// fmt.Println(sample.Subtract(3, 2))
+
+
+type Adder interface {
+  Add(x, y int) int
+}
+
+var sample Adder
+
+
+type MathStuff interface {
+  Add(x, y int) int
+  Multiply(x, y int) int
+}
+
+type MyMath1 struct {}
+
+func (m MyMath1) Add(x, y int) int {
+  return x+y
+}
+
+func (m MyMath1) Multiply(x, y int) int {
+  return x * y
+}
+
+type MyMath2 struct {}
+
+func (m MyMath2) Add(x, y int) int {
+  return x+y
+}
+
+var m MathStuff = MyMath1{}
+
+var m MathStuff = MyMath2
+
+// This is Go's built in error type.
+type error interface {
+  Error() string
+}
+
+
+type CustomError int
+
+func (c CustomError) Error() string {
+  return fmt.Errorf("had a CustomError with error code %d", c)
+}
+
+func blah() error {
+  return CustomError(1)
+}
+
+func main() {
+  for i := 0; i < 10; i++ {
+    go fmt.Println("hello world", i)
+  }
+
+  // We haven't talked about select yet.  Here it is used to keep the program
+  // from ending.  An empty select blocks forever.  Without this, we might
+  // not see anything print, because then main() function might end before
+  // any of the goroutines are able to print.
+  // If you try this, everything will print, but the program will crash.
+  // We will talk about better ways to handle this later.
+  select{}
+}
+
+
+ch := make(chan string, 1)
+
+ch <- "hello"
+
+x := <-ch
+
+for item := range ch {
+  fmt.Println(item)
+}
+
+close(ch)
+
+
+// printer reads ints off of input and prints it to the screen.  When the
+// input channel closes and all data has been read off of input, the exit
+// channel will be closed to signal that printer is done processing.
+func printer(input chan int, exit chan bool) {
+  defer close(exit)
+  for i := range input {
+    fmt.Println(i)
+  }
+}
+
+func main() {
+  input := make(chan int, 10)
+  exit := make(chan boo)
+
+  // Start our printer in a goroutine.
+  go printer(input, exit)
+
+  // Spin off 100 goroutines that feed our printer.
+  for i := 0; i < 100; i++ {
+    go func(i int){
+      input <-i
+    }(i)
+  }
+
+  // Let the print know that we are no longer going to send data.
+  close(input)
+
+  // Wait for the printer to exit.
+  <-exit
+}
+
+func main() {
+  wg := &sync.WaitGroup{}
+
+  // Sping off 1000 goroutines, each one printing a number.
+  for i := 0; i < 1000; i++ {
+    wg.Add(1)  // Add 1 to the counter.  You MUST do this before the func().
+    go func(i int) {
+      defer wg.Done() // Remove 1 from the counter after the func() is finished.
+      fmt.Println(i)
+    }(i)
+  }
+
+  wg.Wait()  // Wait unil all of the goroutines are finished.
+}
+
+
+var counter = 0
+
+func increment(wg *sync.WaitGroup, mu *sync.Mutex) {
+	mu.Lock()
+	defer mu.Unlock()
+	defer wg.Done()
+	counter++
+}
+
+func main() {
+	wg := &sync.WaitGroup{}
+	mu := &sync.Mutex{}
+
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go increment(wg, mu)
+	}
+
+	wg.Wait()
+	fmt.Println(counter)
+}
+
+
+// printer prints a number divded by 2 if it comes on the half channel.
+// It prints a number multiplied by 2 if it comes on the double channel.
+// It terminates if it receives anything on exit.
+func printer(half, double chan int,
+             wg *sync.WaitGroup, exit chan bool) {
+  for {
+    select {
+    case i := <-half:
+      fmt.Printf("%d/2 = %d\n", i, i/2)
+    case i := <-double:
+      fmt.Printf("%d*2 = %d\n", i, i*2)
+    case <-exit:
+      fmt.Println("Quitting...")
+      return
+    }
+    wg.Done()
+  }
+}
+
+func main() {
+  half := make(chan int, 1)
+  double := make(chan int, 1)
+  exit := make(chan bool)
+  wg := &sync.WaitGroup{}
+
+  for i := 1; i < 11; i++ {
+    i := i  // Make i scoped inside the for loop.
+    wg.Add(1)
+    go func(){
+      half <- i
+    }()
+
+    wg.Add(1)
+    go func() {
+      double <- i
+    }()
+  }
+  // This just prevents everything from being in order.  Ignore.
+	time.Sleep(2 * time.Second)
+
+  go printer(half, double, wg, exit)
+
+  wg.Wait()
+  close(exit)
+
+  // Sleep enough time to let "Quitting" print.
+  time.Sleep (2 * time.Second)
+}
+
+// Enumeration using constants.
+const (
+  apple = iota  // apple == 0
+  orange // orange == 1
+  pear  // pear == 2
+)
