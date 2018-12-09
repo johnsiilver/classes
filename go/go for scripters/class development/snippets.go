@@ -908,3 +908,426 @@ const (
   orange // orange == 1
   pear  // pear == 2
 )
+
+//////////////////////////
+// Extended class
+//////////////////////////
+
+func Divide(n int, d int) (float64, error) {
+  if d == 0 {
+    return 0.0, fmt.Errorf("cannot divide by 0")
+  }
+  return float64(n)/float64(d), nil
+}
+
+func TestDivide(t *testing.T) {
+  tests := []struct{
+    desc string
+    n int
+    d int
+    err bool
+    want float64
+  }{
+    {"divide by 0 error", 10, 0, true, 0.0},
+    {"success", 10, 3, false, float64(10)/float64(3)},
+  }
+
+  for _, test := range tests {
+    got, err := Divide(test.n, test.d)
+    switch {
+    case err == nil && test.err:
+      t.Errorf("TestDivide(%s): got err == nil, want err != nil", test.desc)
+      continue
+    case err != nil && !test.err:
+      t.Errorf("TestDivide(%s): got err == %s, want err == nil", test.desc, err)
+      continue
+    case err != nil:
+      continue
+    }
+    if got != test.want {
+      t.Errorf("TestDivide(%s): got %v, want %v", test.desc, got, test.want)
+    }
+  }
+}
+
+var RecNotFound = errors.New("not found")
+
+func IsNotFound(e error) bool {
+  if e == RecNotFound {
+    return true
+  }
+  return false
+}
+
+type ClassID int
+
+type Record struct {
+  ID int
+  LastName, FirstName string
+  Classes []ClassID
+}
+
+type Storage interface {
+  Record(id string) (Record, error)
+  Store(r Record) error
+}
+
+const (
+  unknown = iota
+  read
+  write
+)
+
+type req struct {
+    rType int
+    id int
+    rec Record
+    done chan resp
+}
+
+type resp struct {
+  rec Record
+  err error
+}
+
+type Registrar struct {
+  store Storage
+  ch chan req
+}
+
+func New(s Storage) Registrar {
+  return Registrar{
+    store: s,
+    ch: make(chan req, 100),
+  }
+}
+
+func (r Registrar) Start() {
+  go func() {
+    for input := range r.ch {
+      go r.inputHandler(input)
+    }
+  }()
+}
+
+func (r Registrar) inputHandler(input req) {
+  defer close(input.done)
+
+  switch input.rType{
+  case read:
+    rec, err := r.store.Record(input.id)
+    if err != nil {
+        input.done <- resp{err: err}
+        return
+    }
+    input.done <- resp{rec: rec}
+  case write:
+    if err := r.store.Store(input.rec); err != nil {
+      input.done <- resp{err: err}
+      return
+    }
+    input.done <- resp{}
+  default:
+    input.done <- resp{err: errors.New("operation on Registrar not a recognized type: %d", input.rType)}
+  }
+}
+
+func (r Registrar) Read(id string) (Record, error) {
+  q := req{rType: read, id: id, done: make(chan resp, 1)}
+  r.ch <- q
+  a := <-q.done
+  if a.err != nil {
+    return Record{}, a.err
+  }
+  return a.rec, nil
+}
+
+func (r Registrar) Write(rec Record) error {
+  q := req{rType: write, rec: rec, done: make(chan resp, 1)}
+  r.ch <- q
+  a := <-q.done
+  if a.err != nil {
+    return a.err
+  }
+  return nil
+}
+
+// fakeStore impleme3ents Storage
+type fakeStore struct {
+  mu sync.RWMutex
+  data map[string]Record
+  rErr, wErr bool
+}
+
+func (f *fakeStore) Record(id string) (Record, error) {
+  f.mu.RLock()
+  defer f.mu.RUnlock()
+
+  if f.rErr {
+    return Record{}, errors.New("read error")
+  }
+  if r, ok := f.data[id]; ok {
+    return r, nil
+  }
+  return Record{}, RecNotFound
+}
+
+func (f *fakeStore) Store(r Record) error {
+  f.mu.Lock()
+  defer f.mu.Unlock()
+  if f.wErr {
+    return errors.New("write error")
+  }
+  f.data[r.ID] = r
+  return nil
+}
+
+type Reader interface {
+    Read(p []byte) (n int, err error)
+}
+
+type Writer interface {
+    Write(p []byte) (n int, err error)
+}
+
+type Seeker interface {
+    Seek(offset int64, whence int) (int64, error)
+}
+
+// Data represents data being stored.
+type Data struct {
+	// FirstName is the person's first name.
+	// LastName is the person's last name.
+	FirstName, LastName string
+	// ID is a unique UUIDv4 identifier for this person.
+	ID string
+	// cache holds the cached data that can be used in String(). It is
+	// private, so it will not be Serialized.
+	cache string
+}
+
+func (d Data) validate() error {
+	switch "" {
+	case d.FirstName, d.LastName:
+		return fmt.Errorf("cannot have FirstName or LastName as an empty string")
+	}
+	return nil
+}
+
+// String implements fmt.Stringer.
+func (d *Data) String() string {
+	if d.cache == "" {
+		d.cache = fmt.Sprintf("%s,%s", d.LastName, d.FirstName)
+	}
+	return d.cache
+}
+
+// StoreData writes Data to a file in os.Tempdir using the ID as
+// the file name. If the file exists, it is overwritten.
+func StoreData(d Data) error {
+	if err := d.validate(); err != nil {
+		return err
+	}
+
+	// Bonus points if someone can tell me why you should not do this.
+	n := filepath.Join(os.TempDir(), d.ID)
+	f, err := os.OpenFile(n, os.O_CREATE+os.O_TRUNC, 0666)
+	if err != nil {
+		return fmt.Errorf("could not open file %q: %s", n, err)
+	}
+
+	enc := gob.NewEncoder(f)
+	if err := enc.Encode(d); err != nil {
+		return fmt.Errorf("problems writing file: %s", err)
+	}
+
+	return nil
+}
+
+// GetData returns Data for a specific ID.
+func GetData(id string) (Data, error) {
+	n := filepath.Join(os.TempDir(), id)
+	f, err := os.Open(n)
+	if err != nil {
+		return Data{}, fmt.Errorf("could not open file %q: %s", n, err)
+	}
+	dec := gob.NewDecoder(f)
+
+	d := Data{}
+	if err := dec.Decode(&d); err != nil {
+		return d, fmt.Errorf("could not decode file %q: %s", n, err)
+	}
+	return d, nil
+}
+
+type Data struct {
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	ID        string `json:"id,omitempty"`
+	Cache     string `json:"-"`
+}
+
+// Leaving out the String() and validate() methods for space.
+
+func StoreData(d Data) error {
+	if err := d.validate(); err != nil {
+		return err
+	}
+
+	b, err := json.Marshal(d)
+	if err != nil {
+		return fmt.Errorf("problem JSON encoding data: %s", err)
+	}
+
+	n := filepath.Join(os.TempDir(), d.ID)
+	if err := ioutil.WriteFile(n, b, 0666); err != nil {
+		return fmt.Errorf("problems writing file %q: %s", n, err)
+	}
+
+	return nil
+}
+
+func GetData(id string) (Data, error) {
+	n := filepath.Join(os.TempDir(), id)
+
+	b, err := ioutil.ReadFile(n)
+	if err != nil {
+		return Data{}, fmt.Errorf("could not open file %q: %s", n, err)
+	}
+
+	d := Data{}
+
+	if err := json.Unmarshal(b, &d); err != nil {
+		return d, fmt.Errorf("could not decode file %q: %s", n, err)
+	}
+	return d, nil
+}
+
+
+type Recs []Rec
+
+func (r Recs) Marshal(w *csv.Writer) error {
+	for _, rec := range r {
+		w.Write(rec.marshal())
+	}
+
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *Recs) Unmarshal(read *csv.Reader) error {
+	for i := 0; true; i++{
+		fields, err := read.Read()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+		rec := Rec{}
+		if err := rec.unmarshal(fields); err != nil {
+			if i == 0 {
+				continue // First line can be the column headers
+			}
+			return err
+		}
+
+		*r = append(*r, rec)
+	}
+	return nil
+}
+
+type Rec struct {
+	LastName, FirstName string
+	ID int
+}
+
+func (r Rec) String() string {
+	return fmt.Sprintf("%d::%s::%s", r.ID, r.LastName, r.FirstName)
+}
+
+func (r Rec) marshal() []string {
+	return []string{strconv.Itoa(r.ID), r.LastName, r.FirstName}
+}
+
+func (r *Rec) unmarshal(f []string) error {
+	if len(f) != 3 {
+		return fmt.Errorf("expected 3 fields, got %d", len(f))
+	}
+	i, err := strconv.Atoi(f[0])
+	if err != nil {
+		return fmt.Errorf("first field could not be "+
+			"converted to integer id: %s", err)
+	}
+	r.ID = i
+	r.LastName = f[1]
+	r.FirstName = f[2]
+	return nil
+}
+
+type Recs []Rec
+
+func (r Recs) Marshal(w *csv.Writer) error {
+	for _, rec := range r {
+		w.Write(rec.marshal())
+	}
+
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *Recs) Unmarshal(read *csv.Reader) error {
+	for i := 0; true; i++ {
+		fields, err := read.Read()
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+		rec := Rec{}
+		if err := rec.unmarshal(fields); err != nil {
+			if i == 0 {
+				continue // First line can be the column headers
+			}
+			return err
+		}
+
+		*r = append(*r, rec)
+	}
+	return nil
+}
+
+
+syntax = "proto3";
+
+package record;
+
+message Rec {
+  int64 id = 1;
+  string last_name = 2;
+  string first_name = 3;
+}
+
+func main() {
+  rec := &record.Rec{
+    Id: "10ba038e-48da-487b-96e8-8d3b99b6d18a",
+    LastName: "Doak",
+    FirstName: "John",
+  }
+
+  b, err := proto.Marshal(rec)
+  if err != nil {
+    panic(err)
+  }
+
+  if err := ioutil.WriteFile(rec.Id, b, 0666); err != nil {
+    panic(err)
+  }
+}
